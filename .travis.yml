@@ -1,0 +1,19 @@
+---
+language: python
+services: docker
+
+matrix:
+  include:
+    - os: linux
+      dist: xenial
+
+before_script:
+  - cd ../
+  - mv ansible-role-redeploy-vmware-virtual-machine-with-netbox rekick-vm
+  - cd rekick-vm
+
+install:
+  - pip install molecule docker
+
+script:
+  - molecule lint

@@ -1,0 +1,72 @@
+---
+
+- name: "Get Name"
+  uri:
+    url: "{{ vault_ipam_url }}virtualization/virtual-machines/?format=json&name={{ inventory_hostname }}"
+    method: GET
+    validate_certs: no
+    return_content: yes
+    body_format: json
+    headers:
+      Accept: "application/json"
+  delegate_to: localhost
+  register: get_name
+
+- name: Set facts from IPAM
+  set_fact:
+    vmname: "{{ get_name.json.results[0].name }}"
+    vmmem: "{{ get_name.json.results[0].memory }}"
+    vmcpu: "{{ get_name.json.results[0].vcpus }}"
+    platform: "{{ get_name.json.results[0].platform.name }}"
+    vmipaddr: "{{ get_name.json.results[0].primary_ip.address  | replace('/24', '') }}"
+
+- name: Set facts for vCenter
+  set_fact:
+    vmtemplate: "{% if platform == 'Ubuntu 16.04' %}Ubuntu16{% elif platform == 'Ubuntu 18.04' %}Ubuntu18{% elif platform == 'CentOS 7'%}CentOS7{% endif %}"
+    vmnetwork: "{% if \"10.50.1\" in vmipaddr %}MainNet-VLAN30{% elif \"10.50.4\" in vmipaddr %}DevNet-VLAN60{% else %}VMNet-VLAN50{% endif %}"
+    vmnetmask: "255.255.255.0"
+    vmgateway: "{% if \"10.50.1\" in vmipaddr %}10.50.1.1{% elif \"10.50.4\" in vmipaddr %}10.50.4.1{% else %}10.50.3.1{% endif %}"
+
+- name: "Remove {{ vm_name }}"
+  vmware_guest:
+    validate_certs: False
+    hostname: "{{ vault_vcenter_hostname }}"
+    username: "{{ vault_vcenter_user }}"
+    password: "{{ vault_vcenter_pass }}"
+    cluster: "Cluster"
+    datacenter: LAB
+    name: "{{ vmname }}"
+    state: absent
+    force: yes
+  delegate_to: localhost
+
+- name: "Redploy {{ vm_name }}"
+  vmware_guest:
+    validate_certs: False
+    hostname: "{{ vault_vcenter_hostname }}"
+    username: "{{ vault_vcenter_user }}"
+    password: "{{ vault_vcenter_pass }}"
+    cluster: "Cluster"
+    datacenter: LAB
+    name: "{{ vmname }}"
+    template: "{{ vmtemplate }}"
+    folder: /
+    state: poweredon
+    networks:
+      - name: "{{ vmnetwork }}"
+        start_connected: true
+        ip: "{{ vmipaddr }}"
+        netmask: "{{ vmnetmask }}"
+        gateway: "{{ vmgateway }}"
+        domain: "{{ domain_root }}"
+        dns_servers:
+          - "{{ dns_server_ip }}"
+        type: static
+    customization:
+      dns_servers:
+        - "{{ dns_server_ip }}"
+    hardware:
+      memory_mb: "{{ vmmem }}"
+      num_cpus: "{{ vmcpu }}"
+    wait_for_ip_address: yes
+  delegate_to: localhost
